@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 10000;
 // ============================================================
 
 const SERVER_NAME = "AudioBridge";
-const SERVER_VERSION = "3.0.0";
+const SERVER_VERSION = "3.0.1";
 
 const REGISTRATION_TIMEOUT_MS = 10000;
 const HEARTBEAT_INTERVAL_MS = 30000;
@@ -560,20 +560,6 @@ wss.on("connection", (ws, req) => {
 
     if (isTransmitter) {
 
-        /*
-         * IMPORTANT:
-         *
-         * Do NOT add the transmitter to room.transmitters yet.
-         *
-         * The caster must first send:
-         *
-         * register-transmitter
-         *
-         * and receive:
-         *
-         * transmitter-accepted
-         */
-
         ws.registrationTimer =
             setTimeout(() => {
 
@@ -764,7 +750,7 @@ wss.on("connection", (ws, req) => {
 
 
             // =================================================
-            // ONLY ONE ACTIVE TRANSMITTER PER ROOM
+            // REPLACE STALE/EXISTING TRANSMITTER AUTOMATICALLY
             // =================================================
 
             const existingTransmitter =
@@ -774,7 +760,8 @@ wss.on("connection", (ws, req) => {
                     tx =>
                         tx.registered &&
                         tx.readyState ===
-                            WebSocket.OPEN
+                            WebSocket.OPEN &&
+                        tx !== ws
                 );
 
 
@@ -787,31 +774,16 @@ wss.on("connection", (ws, req) => {
 
                 console.log(
                     `[TX ${station.toUpperCase()}] ` +
-                    `Rejected ${casterId}; ` +
-                    `active transmitter: ${activeCasterId}`
+                    `Replacing existing active transmitter ${activeCasterId} with new connection ${casterId}`
                 );
-
-
-                sendJson(ws, {
-
-                    type:
-                        "transmitter-rejected",
-
-                    reason:
-                        "ANOTHER_TX_ACTIVE",
-
-                    activeCasterId:
-                        activeCasterId
-                });
-
 
                 closeSocket(
-                    ws,
-                    1008,
-                    "Another transmitter is already active"
+                    existingTransmitter,
+                    1001,
+                    "Replaced by new transmitter connection"
                 );
 
-                return;
+                room.transmitters.delete(existingTransmitter);
             }
 
 
@@ -909,11 +881,6 @@ wss.on("connection", (ws, req) => {
                 version:
                     SERVER_VERSION
             });
-
-
-            // =================================================
-            // DO NOT PROCESS REGISTRATION AS AUDIO
-            // =================================================
 
             return;
         }
@@ -1051,7 +1018,6 @@ wss.on("connection", (ws, req) => {
 
         // --------------------------------------------------------
         // Optional low-frequency diagnostic.
-        // Do NOT log every audio packet.
         // --------------------------------------------------------
 
         ws.audioPackets =
@@ -1362,7 +1328,7 @@ server.listen(
         );
 
         console.log(
-            "One active transmitter per station: ENABLED"
+            "One active transmitter per station: ENABLED (Auto-Replacement)"
         );
 
         console.log(
